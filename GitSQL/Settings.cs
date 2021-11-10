@@ -36,12 +36,8 @@ public static class Settings
         OutputDirectory = ConfigurationManager.AppSettings["OutputDirectory"] ?? "";
 
         AppName = System.Reflection.Assembly.GetExecutingAssembly().GetName().Name;
-        AppConfigName = AppName + ".exe.config";
-        var ver = FileVersionInfo.GetVersionInfo(System.Reflection.Assembly.GetExecutingAssembly().Location).FileVersion;
-        if (!string.IsNullOrWhiteSpace(ver))
-        {
-            CurrentVersion = new Version(ver);
-        }
+        AppConfigName = AppName + ".dll.config";
+        CurrentVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
 
         bool valid = false;
         if (String.IsNullOrWhiteSpace(OutputDirectory))

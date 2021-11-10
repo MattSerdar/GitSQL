@@ -151,16 +151,7 @@ public class Git
                 sw.Write(GetOutputHeader().ToString());
             }
         }
-        using (Process p = new Process())
-        {
-            p.StartInfo = new ProcessStartInfo()
-            {
-                UseShellExecute = true,
-                Verb = "open",
-                FileName = OutputLocation
-            };
-            p.Start();
-        }
+        Utils.OpenFile(OutputLocation);
     }
     private string CleanupText(string txt)
     {

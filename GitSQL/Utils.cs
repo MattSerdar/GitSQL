@@ -19,6 +19,19 @@ public static class Utils
         }
         return resultDtm;
     }
+    public static void OpenFile(string fileName)
+    {
+        using (Process p = new Process())
+        {
+            p.StartInfo = new ProcessStartInfo()
+            {
+                UseShellExecute = true,
+                Verb = "open",
+                FileName = fileName
+            };
+            p.Start();
+        }
+    }
     /// <summary>
     /// Console.ForegroundColor = ConsoleColor.DarkCyan;
     /// Console.BackgroundColor = ConsoleColor.Black;

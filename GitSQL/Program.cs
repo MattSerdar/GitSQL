@@ -80,7 +80,7 @@ class Program
             var cfg = Path.Combine(Directory.GetCurrentDirectory(), Settings.AppConfigName);
             if (File.Exists(cfg))
             {
-                Process.Start(cfg);
+                Utils.OpenFile(cfg);
             }
             else
             {
@@ -316,12 +316,12 @@ class Program
         DisplayHelpArg("/o:", "<Output Directory>", "Directory to where you want the file saved");
         DisplayHelpArg("/so:", "<Sort Order>", "Comma separated list for order of appearance in saved file");
 
-        string dateStartSearch = _searchFromDate == DateTimeOffset.MinValue ? _searchFromDate.ToString() : Utils.NotSet;
-        string dateEndSearch = _searchToDate == DateTimeOffset.MinValue ? _searchToDate.ToString() : Utils.NotSet;
+        string dateStartSearch = _searchFromDate != DateTimeOffset.MinValue ? _searchFromDate.ToString() : Utils.NotSet;
+        string dateEndSearch = _searchToDate != DateTimeOffset.MinValue ? _searchToDate.ToString() : Utils.NotSet;
 
         Console.WriteLine();
         Utils.ConsoleColorDarkCyan();
-        Console.WriteLine($"  You current default config settings that can be set via cmd args are:");
+        Console.WriteLine($"  Your current default config settings that can be set via cmd args are:");
         Console.ResetColor();
 
         DisplayCurrentCmdConfig("/st", dateStartSearch);
