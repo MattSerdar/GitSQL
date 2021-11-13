@@ -2,14 +2,10 @@
 public static class Utils
 {
     private static readonly string EncryptionKey = "248D1292-92C3-4300-BAF6-26163FE3015D";
-    private static readonly string EnvKey_PersonalAccessToken;
     public static readonly string NotSet = "<not set>";
-
-    static Utils()
-    {
-        EnvKey_PersonalAccessToken = Settings.AppName + "_" + Settings.RepoName + "_PAT";
-    }
-
+    public static string? AppName { get; set; } = System.Reflection.Assembly.GetExecutingAssembly().GetName().Name;
+    public static Version? CurrentVersion { get; set; } = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+    
     public static DateTimeOffset GetConfigDateTimeOffset(string dtm)
     {
         DateTimeOffset resultDtm = DateTimeOffset.MinValue;
@@ -18,6 +14,70 @@ public static class Utils
             resultDtm = tmpDt;
         }
         return resultDtm;
+    }
+    public static void ValidateFileExtensions(List<string> fileExtensions)
+    {
+        for (var i = 0; i < fileExtensions.Count; i++)
+        {
+            var e = fileExtensions[i];
+            if (!e.StartsWith("."))
+            {
+                fileExtensions[i] = "." + e;
+            }
+        }
+    }
+    public static string ValidateAndCreateOutputDirectory(string outputDir)
+    {
+        if (string.IsNullOrWhiteSpace(outputDir))
+        {
+            outputDir = Directory.GetCurrentDirectory();
+        }
+        if (outputDir.Equals("d", StringComparison.OrdinalIgnoreCase))
+        {
+            outputDir = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+        }
+        else if (outputDir.Equals("md", StringComparison.OrdinalIgnoreCase))
+        {
+            outputDir = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        }
+        else if (!Directory.Exists(outputDir))
+        {
+            string? drive = Path.GetPathRoot(outputDir);
+            if (!Directory.Exists(drive))
+            {
+                throw new Exception($"Drive letter {drive} specified doesn't exist in path {outputDir}");
+            }
+            else
+            {
+                var di = Directory.CreateDirectory(outputDir);
+                outputDir = di.FullName;
+            }
+        }
+
+        // suffix the output with the app name to keep the directory organized
+        if (!string.IsNullOrWhiteSpace(AppName) && !outputDir.EndsWith("\\" + AppName, StringComparison.InvariantCultureIgnoreCase))
+        {
+            outputDir = Path.Combine(outputDir, AppName);
+        }
+
+        if (!Directory.Exists(outputDir))
+        {
+            Directory.CreateDirectory(outputDir);
+        }
+        return outputDir;
+    }
+    public static List<string> ConvertStringToList(string input)
+    {
+        List<string> list = new List<string>();
+        if (!String.IsNullOrWhiteSpace(input))
+        {
+            var items = input.Split(new string[] { ",", ";" }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var i in items)
+            {
+                list.Add(i.Trim());
+            }
+        }
+        return list;
     }
     public static void OpenFile(string fileName)
     {
@@ -86,9 +146,9 @@ public static class Utils
         Console.ForegroundColor = ConsoleColor.Green;
         Console.BackgroundColor = ConsoleColor.Black;
     }
-    public static string GetRepoPersonalAccessToken()
+    public static string GetRepoPersonalAccessToken(string environmentVariableName)
     {
-        var tmp = Environment.GetEnvironmentVariable(EnvKey_PersonalAccessToken, EnvironmentVariableTarget.User);
+        var tmp = Environment.GetEnvironmentVariable(environmentVariableName, EnvironmentVariableTarget.User);
         if (!string.IsNullOrWhiteSpace(tmp))
         {
             tmp = Decrypt(tmp);
@@ -99,9 +159,9 @@ public static class Utils
         }
         return tmp;
     }
-    public static void SetRepoPersonalAccessToken(string pat)
+    public static void SetRepoPersonalAccessToken(string environmentVariableName, string pat)
     {
-        Environment.SetEnvironmentVariable(EnvKey_PersonalAccessToken, Encrypt(pat), EnvironmentVariableTarget.User);
+        Environment.SetEnvironmentVariable(environmentVariableName, Encrypt(pat), EnvironmentVariableTarget.User);
     }
     /// <summary>
     /// 

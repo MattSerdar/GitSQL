@@ -2,14 +2,17 @@
 public class Git
 {
     private readonly GitHubClient client;
-    //private GitResult Result = new GitResult();
     private int DirectorySortOrder = 0;
-    private readonly SettingsArgs args;
+    private readonly SettingsArgs Settings;
+    private readonly GitHub GitHubSettings;
+    private readonly Output OutputSettings;
 
-    public Git(SettingsArgs args)
+    public Git(SettingsArgs args, GitHub gitHub, Output output)
     {
-        this.args = args;
-        client = new GitHubClient(new Octokit.ProductHeaderValue(Settings.ProductHeader));
+        GitHubSettings = gitHub;
+        Settings = args;
+        OutputSettings = output;
+        client = new GitHubClient(new Octokit.ProductHeaderValue(gitHub.ProductHeader));
         if (!string.IsNullOrWhiteSpace(args.RepoPersonalAccessToken))
         {
             client.Credentials = new Credentials(args.RepoPersonalAccessToken);
@@ -20,13 +23,12 @@ public class Git
         }
         Init();
     }
-    public string OutputLocation { get; private set; } = "";
-    public static string ValidateClientCredentials(string pat)
+    public static string ValidateClientCredentials(string pat, string productHeader)
     {
         string msg = "";
         try
         {
-            var c = new GitHubClient(new Octokit.ProductHeaderValue(Settings.ProductHeader))
+            var c = new GitHubClient(new Octokit.ProductHeaderValue(productHeader))
             {
                 Credentials = new Credentials(pat)
             };
@@ -38,35 +40,26 @@ public class Git
         }
         return msg;
     }
-    public static string ValidateExistingClientCredentials()
-    {
-        return ValidateClientCredentials(Utils.GetRepoPersonalAccessToken());
-    }
     public GitResult GitResults { get; private set; } = new GitResult();
-    //public void CreateOutputFile()
-    //{
-    //    GetFiles();
-    //}
 
     #region private methods
     private void Init()
     {
         TruncateDir();
-        OutputLocation = GetFileName(args.OutputDirectory, args.OutputFileName);
     }
     private StringBuilder GetOutputHeader()
     {
-        string dateStartSearch = args.SearchFromDate != DateTimeOffset.MinValue ? args.SearchFromDate.ToString() : Utils.NotSet;
-        string dateEndSearch = args.SearchToDate != DateTimeOffset.MinValue ? args.SearchToDate.ToString() : Utils.NotSet;
+        string dateStartSearch = Settings.SearchFromDate != DateTimeOffset.MinValue ? Settings.SearchFromDate.ToString() : Utils.NotSet;
+        string dateEndSearch = Settings.SearchToDate != DateTimeOffset.MinValue ? Settings.SearchToDate.ToString() : Utils.NotSet;
 
         var sb = new StringBuilder();
         sb.AppendLine("/*");
 
         sb.AppendFormat("There were a total of {0} files found.{1}", GitResults.ValidCommits.Sum(e => e.CommitFiles.Count), Environment.NewLine);
-        if (args.RawArgs.Count > 0)
+        if (Settings.RawArgs.Count > 0)
         {
             sb.AppendFormat("{0}The command line args used to get the files were the following:{0}", Environment.NewLine);
-            foreach (var a in args.RawArgs)
+            foreach (var a in Settings.RawArgs)
             {
                 sb.AppendLine(string.Format("  {0}", a));
             }
@@ -74,18 +67,18 @@ public class Git
         sb.AppendLine("");
 
         sb.AppendLine("The following settings were used:");
-        sb.AppendFormat($"  {Settings.AppName}:             {Settings.CurrentVersion}{Environment.NewLine}");
-        sb.AppendFormat($"  RepoName:              {Settings.RepoName}{Environment.NewLine}");
+        sb.AppendFormat($"  {Utils.AppName}:       {Utils.CurrentVersion}{Environment.NewLine}");
+        sb.AppendFormat($"  RepoName:              {GitHubSettings.RepoName}{Environment.NewLine}");
         sb.AppendFormat($"  Search from date:      {dateStartSearch}{Environment.NewLine}");
         sb.AppendFormat($"  Search to date:        {dateEndSearch}{Environment.NewLine}");
-        sb.AppendFormat($"  Output file name:      {Path.Combine(args.OutputDirectory, args.OutputFileName)}{Environment.NewLine}");
-        sb.AppendFormat($"  Ignored file pattern:  {String.Join(", ", args.IgnoredFilePattern)}{Environment.NewLine}");
-        sb.AppendFormat($"  File search pattern:   {String.Join(", ", args.FileSearchPattern)}{Environment.NewLine}");
-        sb.AppendFormat($"  Directory Sort Order:  {String.Join(", ", args.DirectorySortOrder)}{Environment.NewLine}");
+        sb.AppendFormat($"  Output file name:      {Path.Combine(Settings.OutputDirectory, Settings.OutputFileName)}{Environment.NewLine}");
+        sb.AppendFormat($"  Ignored file pattern:  {String.Join(", ", Settings.IgnoredFilePattern)}{Environment.NewLine}");
+        sb.AppendFormat($"  File search pattern:   {String.Join(", ", Settings.FileSearchPattern)}{Environment.NewLine}");
+        sb.AppendFormat($"  Directory Sort Order:  {String.Join(", ", Settings.DirectorySortOrder)}{Environment.NewLine}");
         sb.AppendFormat($"  Sub Directories:       {String.Join(", ", Settings.SubDirectories)}{Environment.NewLine}");
 
         sb.AppendFormat($"  File Extensions:       {String.Join(", ", Settings.FileExtensions)}{Environment.NewLine}");
-        sb.AppendFormat($"  Truncate Output Files: {Settings.TruncateOutputFiles}{Environment.NewLine}");
+        sb.AppendFormat($"  Truncate Output Files: {OutputSettings.TruncateOutputFiles}{Environment.NewLine}");
         sb.AppendLine("");
 
 
@@ -119,7 +112,7 @@ public class Git
             fNamesList.AppendFormat("END{0}GO{0}", Environment.NewLine);
             fNamesList.AppendLine();
 
-            using (var sw = new StreamWriter(OutputLocation, false, utf8))
+            using (var sw = new StreamWriter(Settings.OutputFileNamePath, false, utf8))
             {
                 sw.Write(fNamesList.ToString());
                 foreach (var vc in GitResults.ValidCommits)
@@ -128,7 +121,7 @@ public class Git
                     {
                         try
                         {
-                            var blob = client.Git.Blob.Get(Settings.RepoOwnerName, Settings.RepoName, f.Sha);
+                            var blob = client.Git.Blob.Get(GitHubSettings.RepoOwnerName, GitHubSettings.RepoName, f.Sha);
                             var n = Encoding.UTF8.GetString(Convert.FromBase64String(blob.Result.Content)) + Environment.NewLine;
                             if (n.Length > 0)
                             {
@@ -143,15 +136,15 @@ public class Git
                     }
                 }
             }
-        }
-        else
-        {
-            using (var sw = new StreamWriter(OutputLocation, false, utf8))
+}
+else
+{
+            using (var sw = new StreamWriter(Settings.OutputFileNamePath, false, utf8))
             {
                 sw.Write(GetOutputHeader().ToString());
             }
         }
-        Utils.OpenFile(OutputLocation);
+        Utils.OpenFile(Settings.OutputFileNamePath);
     }
     private string CleanupText(string txt)
     {
@@ -189,14 +182,14 @@ public class Git
     }
     private void TruncateDir()
     {
-        if (!Settings.TruncateOutputFiles)
+        if (!OutputSettings.TruncateOutputFiles)
         {
             return;
         }
         // get the file name and try to match and
         // delete only similar ones
-        var fi = new FileInfo(args.OutputFileName);
-        string[] filesToDelete = Directory.GetFiles(args.OutputDirectory, GetWildCardNameToSearch(fi));
+        var fi = new FileInfo(Settings.OutputFileName);
+        string[] filesToDelete = Directory.GetFiles(Settings.OutputDirectory, GetWildCardNameToSearch(fi));
         DeleteFiles(filesToDelete);
     }
     private string GetWildCardNameToSearch(FileInfo file)
@@ -249,9 +242,9 @@ public class Git
         InitDirectorySortOrder();
         var x = new CommitRequest()
         {
-            Since = args.SearchFromDate == DateTimeOffset.MinValue ? null : args.SearchFromDate,
-            Path = Settings.RepoPath,
-            Until = args.SearchToDate == DateTimeOffset.MinValue ? null : args.SearchToDate,
+            Since = Settings.SearchFromDate == DateTimeOffset.MinValue ? null : Settings.SearchFromDate,
+            Path = GitHubSettings.RepoPath,
+            Until = Settings.SearchToDate == DateTimeOffset.MinValue ? null : Settings.SearchToDate,
         };
 
         Utils.ConsoleColorCyan();
@@ -269,7 +262,7 @@ public class Git
         }
         Console.ResetColor();
         Console.WriteLine();
-        var commits = await client.Repository.Commit.GetAll(Settings.RepoOwnerName, Settings.RepoName, x);
+        var commits = await client.Repository.Commit.GetAll(GitHubSettings.RepoOwnerName, GitHubSettings.RepoName, x);
 
         GitResults.CountOfCommits = commits.Count;
 
@@ -288,7 +281,7 @@ public class Git
             WriteLineToConsole($"SHA = {c.Sha}");
             WriteLineToConsole($"Url = {c.HtmlUrl}");
             Console.ResetColor();
-            var sngCommit = await client.Repository.Commit.Get(Settings.RepoOwnerName, Settings.RepoName, c.Sha);
+            var sngCommit = await client.Repository.Commit.Get(GitHubSettings.RepoOwnerName, GitHubSettings.RepoName, c.Sha);
             foreach (var a in sngCommit.Files)
             {
                 if (IsValidCommitFile(a))
@@ -315,14 +308,14 @@ public class Git
     }
     private void WriteLineToConsole(string txt)
     {
-        if (Debugger.IsAttached || Settings.LogToConsole)
+        if (OutputSettings.LogToConsole)
         {
             Console.WriteLine(txt);
         }
     }
     private void WriteToConsole(string txt)
     {
-        if (Debugger.IsAttached || Settings.LogToConsole)
+        if (OutputSettings.LogToConsole)
         {
             Console.Write(txt);
         }
@@ -431,11 +424,11 @@ public class Git
     }
     private bool IsValidSubDirectory(string[] fileparts)
     {
-        bool valid = false;
         if (Settings.SubDirectories.Count == 0)
         {
             return true;
         }
+        bool valid = false;
         foreach (var p in fileparts)
         {
             valid = Settings.SubDirectories.Contains(p, StringComparer.CurrentCultureIgnoreCase);
@@ -448,9 +441,9 @@ public class Git
     }
     private bool IsValidExtension(string fileName)
     {
-        var fnName = new FileInfo(fileName);
         if (Settings.FileExtensions.Count > 0)
         {
+            var fnName = new FileInfo(fileName);
             return Settings.FileExtensions.Contains(fnName.Extension, StringComparer.CurrentCultureIgnoreCase);
         }
         return true;
@@ -458,10 +451,10 @@ public class Git
     private bool IsIgnoredFile(string fileName)
     {
         bool skip = false;
-        if (args.IgnoredFilePattern.Count > 0)
+        if (Settings.IgnoredFilePattern.Count > 0)
         {
             var fi = new FileInfo(fileName);
-            foreach (var p in args.IgnoredFilePattern)
+            foreach (var p in Settings.IgnoredFilePattern)
             {
                 skip = fi.Name.Like(p);
                 if (skip)
@@ -474,11 +467,11 @@ public class Git
     }
     private bool IsPatternMatch(string fileName)
     {
-        bool isMatch = false;
-        if (args.FileSearchPattern.Count > 0)
+        bool isMatch = Settings.FileSearchPattern.Count == 0;
+        if (Settings.FileSearchPattern.Count > 0)
         {
             var fi = new FileInfo(fileName);
-            foreach (var p in args.FileSearchPattern)
+            foreach (var p in Settings.FileSearchPattern)
             {
                 isMatch = fi.Name.Like(p);
                 if (isMatch)

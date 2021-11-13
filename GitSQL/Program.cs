@@ -1,59 +1,59 @@
-﻿namespace GitSQL;
+﻿using System.Text.Json;
+
+namespace GitSQL;
 class Program
 {
-    private static DateTimeOffset _searchFromDate = Settings.SearchFromDate;
-    private static DateTimeOffset _searchToDate = Settings.SearchToDate;
-    private static string _outputFileNameOnly = Settings.OutputFileName;
-    private static readonly List<string> _ignoredFilePattern = Settings.IgnoredFilePattern;
-    private static readonly List<string> _fileSearchPattern = Settings.FileSearchPattern;
-    private static string _outDir = Settings.OutputDirectory;
-    private static readonly List<string> _directorySortOrder = Settings.DirectorySortOrder;
-
     private const string _leftPadding = "    ";
-    private static string _outputFileNameWithDir = "";
-    private static readonly List<Nmv> _nmvList = new List<Nmv>();
-    private static readonly StringBuilder _errMsg = new StringBuilder();
+    private static readonly List<Nmv> _nmvList = new();
+    private static readonly StringBuilder _errMsg = new();
     private static ArgState _argSt = ArgState.Unknown;
     private static TimeSpan _duration;
-
-    private static readonly List<string> _validArgs = new List<string>()
-        {
-            "/?", "-?",   // display help
-            "/e", "-e",   // display config file
-            "/c", "-c",   // credentials/PAT
-            "/g", "-g",   // Get current PAT
-            "/rg", "-rg", // Removes the currently set PAT
-            "/st", "-st", // SearchFromDate
-            "/en", "-en", // SearchToDate
-            "/f", "-f",   // OutputFileName
-            "/i", "-i",   // IgnoredFilePattern
-            "/s", "-s",   // FileSearchPattern
-            "/o", "-o",   // OutputDirectory
-            "/so", "-so", // DirectorySortOrder
-        };
-
-    enum ArgState
+    private static readonly AppSettings Config = new();
+    private static string EnvKey_PersonalAccessToken = "";
+    private static readonly List<string> _validArgs = new()
     {
-        Unknown = 0,
-        DisplayHelp = 1,
-        Valid = 2,
-        Invalid = 3,
-        Edit = 4,
-        Creds = 5,
-        GetCreds = 6,
-        RemoveCreds = 7
-    }
-    enum OffsetType
-    {
-        Unknown = 0,
-        Hours = 1,
-        Days = 2,
-        Minutes = 3,
-        ExactDateTime = 4
-    }
+        "?",// display help
+        "c",// credentials/PAT
+        "e",// edit config file
+        "en",// SearchToDate
+        "f",// OutputFileName
+        "fe",// FileExtensions
+        "g",// Get current PAT
+        "i",// IgnoredFilePattern
+        "o",// OutputDirectory
+        "r",// Removes the currently set PAT
+        "s",// FileSearchPattern
+        "sd",// SubDirectories
+        "so",// DirectorySortOrder
+        "st",// SearchFromDate
+        "v",// display config file
+    };
+
     public static async Task<int> Main(string[] args)
     {
+        try
+        {
+            ConfigurationBinder.Bind(new ConfigurationBuilder()
+               .SetBasePath(AppContext.BaseDirectory)
+               .AddJsonFile("appsettings.json", false, true)
+               .Build()
+               .GetSection("App"), Config);
+        }
+        catch (Exception exc)
+        {
+            SetErrorMessage("Json Error", exc.ToString());
+            return Final(1);
+        }
+
+        EnvKey_PersonalAccessToken = $"{Utils.AppName}_{Config.GitHub.RepoName}_PAT";
+
         ParseArgs(args);
+
+        if (_argSt == ArgState.Valid)
+        {
+            ValidateArgs();
+        }
+
         if (_argSt == ArgState.DisplayHelp)
         {
             DisplayHelp();
@@ -77,7 +77,7 @@ class Program
         else if (_argSt == ArgState.Edit)
         {
             // try to open up the config file
-            var cfg = Path.Combine(Directory.GetCurrentDirectory(), Settings.AppConfigName);
+            var cfg = Path.Combine(Directory.GetCurrentDirectory(), "appsettings.json");
             if (File.Exists(cfg))
             {
                 Utils.OpenFile(cfg);
@@ -87,6 +87,16 @@ class Program
                 Console.WriteLine(String.Format("{0} was not found.", cfg));
             }
         }
+        else if (_argSt == ArgState.View)
+        {
+            var options = new JsonSerializerOptions()
+            {
+                PropertyNameCaseInsensitive = true,
+                WriteIndented = true
+            };
+            var js = JsonSerializer.Serialize(Config, options);
+            Console.WriteLine(js);
+        }
         else if (_argSt == ArgState.Valid)
         {
             var passMinCriteria = ValidateMinimumRequirements();
@@ -95,25 +105,24 @@ class Program
                 Stopwatch sw = new Stopwatch();
                 sw.Start();
 
-                SettingsArgs sa = new SettingsArgs
+                SettingsArgs sa = new()
                 {
-                    SearchFromDate = _searchFromDate,
-                    SearchToDate = _searchToDate,
-                    IgnoredFilePattern = _ignoredFilePattern,
-                    DirectorySortOrder = _directorySortOrder,
-                    FileSearchPattern = _fileSearchPattern,
-                    OutputFileName = _outputFileNameOnly,
-                    OutputDirectory = _outDir,
-                    RepoPersonalAccessToken = Utils.GetRepoPersonalAccessToken(),
+                    SearchFromDate = Config.Args.SearchFromDate,
+                    SearchToDate = Config.Args.SearchToDate,
+                    IgnoredFilePattern = Config.Args.IgnoredFilePattern,
+                    DirectorySortOrder = Config.Args.DirectorySortOrder,
+                    FileSearchPattern = Config.Args.FileSearchPattern,
+                    OutputFileName = Config.Args.OutputFileName,
+                    OutputDirectory = Config.Args.OutputDirectory,
+                    RepoPersonalAccessToken = Utils.GetRepoPersonalAccessToken(EnvKey_PersonalAccessToken),
                     RawArgs = args.ToList()
                 };
-                GitResult result = new GitResult();
+                GitResult result = new();
                 try
                 {
-                    var g = new Git(sa);
+                    var g = new Git(sa, Config.GitHub, Config.Output);
                     await g.GetCommitsAsync();
                     result = g.GitResults;
-                    _outputFileNameWithDir = g.OutputLocation;
                 }
                 catch (Exception exc)
                 {
@@ -140,11 +149,11 @@ class Program
     }
     private static void RemoveCredentials()
     {
-        Utils.SetRepoPersonalAccessToken("");
+        Utils.SetRepoPersonalAccessToken(EnvKey_PersonalAccessToken, "");
     }
     private static void GetCredentials()
     {
-        string c = Utils.GetRepoPersonalAccessToken();
+        string c = Utils.GetRepoPersonalAccessToken(EnvKey_PersonalAccessToken);
         if (!string.IsNullOrWhiteSpace(c))
         {
             SetClipboardText(c);
@@ -190,9 +199,9 @@ class Program
         // the only possible option for credentials is a personal access token
         if (!string.IsNullOrWhiteSpace(pwd))
         {
-            Utils.SetRepoPersonalAccessToken(pwd);
+            Utils.SetRepoPersonalAccessToken(EnvKey_PersonalAccessToken, pwd);
         }
-        var errMsg = Git.ValidateClientCredentials(Utils.GetRepoPersonalAccessToken());
+        var errMsg = Git.ValidateClientCredentials(Utils.GetRepoPersonalAccessToken(EnvKey_PersonalAccessToken), Config.GitHub.ProductHeader);
         if (!string.IsNullOrWhiteSpace(errMsg))
         {
             Utils.ConsoleColorRed();
@@ -219,23 +228,23 @@ class Program
         Utils.ConsoleColorCyan();
         Console.WriteLine("########################### Summary ###########################");
         Console.ResetColor();
-        Console.WriteLine("{0}:                  {1}", Settings.AppName, Settings.CurrentVersion);
+        Console.WriteLine("{0}:                  {1}", Utils.AppName, Utils.CurrentVersion);
         Console.WriteLine("Commits Searched:           {0}", result.CountOfCommits);
         Console.WriteLine("Files found:                {0}", results.Sum(e => e.CommitFiles.Count));
-        Console.WriteLine("ProductHeader:              {0}", Settings.ProductHeader);
-        Console.WriteLine("RepoOwnerName:              {0}", Settings.RepoOwnerName);
-        Console.WriteLine("RepoName:                   {0}", Settings.RepoName);
-        Console.WriteLine("RepoPath:                   {0}", Settings.RepoPath);
-        Console.WriteLine("Search from date:           {0}", _searchFromDate != DateTimeOffset.MinValue ? _searchFromDate.ToString() : Utils.NotSet);
-        Console.WriteLine("Search to date:             {0}", _searchToDate != DateTimeOffset.MinValue ? _searchToDate.ToString() : Utils.NotSet);
-        Console.WriteLine("Output file name:           {0}", _outputFileNameWithDir);
-        Console.WriteLine("Ignored file pattern:       {0}", String.Join(", ", _ignoredFilePattern.ToArray()));
-        Console.WriteLine("File search pattern:        {0}", String.Join(", ", _fileSearchPattern.ToArray()));
-        Console.WriteLine("Directory Sort Order:       {0}", _directorySortOrder.Count > 0 ? String.Join(", ", _directorySortOrder.ToArray()) : Utils.NotSet);
-        Console.WriteLine("Sub Directories:            {0}", Settings.SubDirectories.Count > 0 ? String.Join(", ", Settings.SubDirectories.ToArray()) : "*");
-        Console.WriteLine("File Extensions:            {0}", Settings.FileExtensions.Count > 0 ? String.Join(", ", Settings.FileExtensions.ToArray()) : "*");
-        Console.WriteLine("Truncate Output Files:      {0}", Settings.TruncateOutputFiles.ToString());
-        Console.WriteLine("LogToConsole:               {0}", Settings.LogToConsole.ToString());
+        Console.WriteLine("ProductHeader:              {0}", Config.GitHub.ProductHeader);
+        Console.WriteLine("RepoOwnerName:              {0}", Config.GitHub.RepoOwnerName);
+        Console.WriteLine("RepoName:                   {0}", Config.GitHub.RepoName);
+        Console.WriteLine("RepoPath:                   {0}", Config.GitHub.RepoPath);
+        Console.WriteLine("Search from date:           {0}", Config.Args.SearchFromDate != DateTimeOffset.MinValue ? Config.Args.SearchFromDate.ToString() : Utils.NotSet);
+        Console.WriteLine("Search to date:             {0}", Config.Args.SearchToDate != DateTimeOffset.MinValue ? Config.Args.SearchToDate.ToString() : Utils.NotSet);
+        Console.WriteLine("Output file name:           {0}", Path.Combine(Config.Args.OutputDirectory, Config.Args.OutputFileName));
+        Console.WriteLine("Ignored file pattern:       {0}", String.Join(", ", Config.Args.IgnoredFilePattern));
+        Console.WriteLine("File search pattern:        {0}", String.Join(", ", Config.Args.FileSearchPattern));
+        Console.WriteLine("Directory Sort Order:       {0}", Config.Args.DirectorySortOrder.Count > 0 ? String.Join(", ", Config.Args.DirectorySortOrder) : Utils.NotSet);
+        Console.WriteLine("Sub Directories:            {0}", Config.Args.SubDirectories.Count > 0 ? String.Join(", ", Config.Args.SubDirectories) : "*");
+        Console.WriteLine("File Extensions:            {0}", Config.Args.FileExtensions.Count > 0 ? String.Join(", ", Config.Args.FileExtensions) : "*");
+        Console.WriteLine("Truncate Output Files:      {0}", Config.Output.TruncateOutputFiles.ToString());
+        Console.WriteLine("LogToConsole:               {0}", Config.Output.LogToConsole.ToString());
         Console.WriteLine("Total running time:         {0}", _duration);
 
         Console.WriteLine();
@@ -287,7 +296,7 @@ class Program
     private static void DisplayHelp()
     {
         Utils.ConsoleColorDarkCyan();
-        Console.WriteLine($"{Settings.AppName} v{Settings.CurrentVersion} - Create one file for all your sql changes.{Environment.NewLine}");
+        Console.WriteLine($"{Utils.AppName} v{Utils.CurrentVersion} - Create one file for all your sql changes.{Environment.NewLine}");
         Console.ResetColor();
 
         Utils.ConsoleColorDarkCyan();
@@ -295,13 +304,14 @@ class Program
         Console.ResetColor();
 
         DisplayHelpArg("/?", "", "displays this usage guide");
-        DisplayHelpArg("/e", "", "Open the config file for viewing/editing");
+        DisplayHelpArg("/e", "", "Open the config file for editing");
+        DisplayHelpArg("/v", "", "View the config file");
 
         Console.WriteLine();
         Console.WriteLine($"{_leftPadding}Configuring your GitHub setup:");
         DisplayHelpArg("/c:", "<PAT>", "use this to set your GitHub PAT \"Personal Access Token\"");
         DisplayHelpArg("/g", "", "Gets your current GitHub PAT and copies to clipboard");
-        DisplayHelpArg("/rg", "", "Removes your stored PAT from this environment - DOES NOT REMOVE FROM GITHUB");
+        DisplayHelpArg("/r", "", "Removes your stored PAT from this environment - DOES NOT REMOVE FROM GITHUB");
 
         Console.WriteLine();
         Console.WriteLine($"{_leftPadding}Search by Date Range options:");
@@ -316,35 +326,35 @@ class Program
         DisplayHelpArg("/o:", "<Output Directory>", "Directory to where you want the file saved");
         DisplayHelpArg("/so:", "<Sort Order>", "Comma separated list for order of appearance in saved file");
 
-        string dateStartSearch = _searchFromDate != DateTimeOffset.MinValue ? _searchFromDate.ToString() : Utils.NotSet;
-        string dateEndSearch = _searchToDate != DateTimeOffset.MinValue ? _searchToDate.ToString() : Utils.NotSet;
+        string dateStartSearch = Config.Args.SearchFromDate != DateTimeOffset.MinValue ? Config.Args.SearchFromDate.ToString() : Utils.NotSet;
+        string dateEndSearch = Config.Args.SearchToDate != DateTimeOffset.MinValue ? Config.Args.SearchToDate.ToString() : Utils.NotSet;
 
         Console.WriteLine();
         Utils.ConsoleColorDarkCyan();
-        Console.WriteLine($"  Your current default config settings that can be set via cmd args are:");
+        Console.WriteLine($"  Your current default config settings that can be overwritten via cmd args are:");
         Console.ResetColor();
 
         DisplayCurrentCmdConfig("/st", dateStartSearch);
         DisplayCurrentCmdConfig("/en", dateEndSearch);
-        DisplayCurrentCmdConfig("/f", Settings.OutputFileName);
-        DisplayCurrentCmdConfig("/i", _ignoredFilePattern.Count == 0 ? Utils.NotSet : String.Join(", ", _ignoredFilePattern));
-        DisplayCurrentCmdConfig("/s", String.Join(", ", _fileSearchPattern));
-        DisplayCurrentCmdConfig("/o", Path.Combine(_outDir, _outputFileNameOnly));
-        DisplayCurrentCmdConfig("/so", String.Join(", ", _directorySortOrder));
+        DisplayCurrentCmdConfig("/f", Config.Args.OutputFileName);
+        DisplayCurrentCmdConfig("/i", Config.Args.IgnoredFilePattern.Count == 0 ? Utils.NotSet : String.Join(", ", Config.Args.IgnoredFilePattern));
+        DisplayCurrentCmdConfig("/s", String.Join(", ", Config.Args.FileSearchPattern));
+        DisplayCurrentCmdConfig("/o", Path.Combine(Config.Args.OutputDirectory, Config.Args.OutputFileName));
+        DisplayCurrentCmdConfig("/so", Config.Args.DirectorySortOrder.Count == 0 ? Utils.NotSet : String.Join(", ", Config.Args.DirectorySortOrder));
+        DisplayCurrentCmdConfig("/fe", Config.Args.FileExtensions.Count == 0 ? Utils.NotSet : String.Join(", ", Config.Args.FileExtensions));
+        DisplayCurrentCmdConfig("/sd", Config.Args.SubDirectories.Count == 0 ? Utils.NotSet : String.Join(", ", Config.Args.SubDirectories));
 
         Console.WriteLine();
         Utils.ConsoleColorDarkCyan();
         Console.WriteLine("  These can only be revised in the config file:");
         Console.ResetColor();
 
-        DisplayCurrentConfig("ProductHeader", Settings.ProductHeader);
-        DisplayCurrentConfig("RepoOwnerName", Settings.RepoOwnerName);
-        DisplayCurrentConfig("RepoName", Settings.RepoName);
-        DisplayCurrentConfig("RepoPath", Settings.RepoPath);
-        DisplayCurrentConfig("TruncateOutputFiles", Settings.TruncateOutputFiles.ToString());
-        DisplayCurrentConfig("SubDirectories", String.Join(", ", Settings.SubDirectories));
-        DisplayCurrentConfig("FileExtensions", String.Join(", ", Settings.FileExtensions));
-        DisplayCurrentConfig("LogToConsole", Settings.LogToConsole.ToString());
+        DisplayCurrentConfig("ProductHeader", Config.GitHub.ProductHeader);
+        DisplayCurrentConfig("RepoOwnerName", Config.GitHub.RepoOwnerName);
+        DisplayCurrentConfig("RepoName", Config.GitHub.RepoName);
+        DisplayCurrentConfig("RepoPath", Config.GitHub.RepoPath);
+        DisplayCurrentConfig("TruncateOutputFiles", Config.Output.TruncateOutputFiles.ToString());
+        DisplayCurrentConfig("LogToConsole", Config.Output.LogToConsole.ToString());
 
         Console.WriteLine();
         Utils.ConsoleColorDarkCyan();
@@ -374,7 +384,7 @@ class Program
         bool validMinRequirements = ValidateMinimumRequirements();
         if (validMinRequirements)
         {
-            string invalidCredsmsg = Git.ValidateExistingClientCredentials();
+            string invalidCredsmsg = Git.ValidateClientCredentials(Utils.GetRepoPersonalAccessToken(EnvKey_PersonalAccessToken), Config.GitHub.ProductHeader);
             if (!string.IsNullOrWhiteSpace(invalidCredsmsg))
             {
                 Utils.ConsoleColorRed();
@@ -408,7 +418,9 @@ class Program
                 val = tmpArr[1];
             }
 
-            if (_validArgs.Any(e => e.Equals(name, StringComparison.OrdinalIgnoreCase)))
+            if (_validArgs.Any(e =>
+                ("/" + e).Equals(name, StringComparison.OrdinalIgnoreCase) ||
+                ("-" + e).Equals(name, StringComparison.OrdinalIgnoreCase)))
             {
                 if (_nmvList.Any(e => e.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
                 {
@@ -427,6 +439,33 @@ class Program
                 _errMsg.AppendLine(String.Format("An invalid arg of {0} was passed in.", name));
                 break;
             }
+        }
+    }
+    private static void ValidateArgs()
+    {
+        _errMsg.Clear();
+        try
+        {
+            Config.Args.OutputDirectory = Utils.ValidateAndCreateOutputDirectory(Config.Args.OutputDirectory);
+            if (string.IsNullOrWhiteSpace(Config.Args.OutputFileName))
+            {
+                Config.Args.OutputFileName = $"{Utils.AppName}_{Config.GitHub.RepoName}.txt";
+            }
+            if (!ValidFileName(Config.Args.OutputFileName))
+            {
+                _errMsg.AppendLine($"The output filename is invalid {Config.Args.OutputFileName}.");
+                _argSt = ArgState.Invalid;
+            }
+        }
+        catch (Exception exc)
+        {
+            _argSt = ArgState.Invalid;
+            _errMsg.AppendLine(exc.Message);
+        }
+
+        if (_argSt == ArgState.Invalid && _errMsg.Length > 0)
+        {
+            SetErrorMessage("The following error occurred during arg validation:", _errMsg.ToString());
         }
     }
     private static void ParseArgs(string[] args)
@@ -452,24 +491,23 @@ class Program
                     name.Equals("-e", StringComparison.OrdinalIgnoreCase)
                     )
                 {
-                    // edit the config file
                     _argSt = ArgState.Edit;
                     break;
                 }
                 else if (
-                    name.Equals("/r", StringComparison.OrdinalIgnoreCase) ||
-                    name.Equals("-r", StringComparison.OrdinalIgnoreCase)
+                    name.Equals("/v", StringComparison.OrdinalIgnoreCase) ||
+                    name.Equals("-v", StringComparison.OrdinalIgnoreCase)
                     )
                 {
-                    _ignoredFilePattern.Clear();
-                    if (!string.IsNullOrWhiteSpace(val))
-                    {
-                        string[] tmpPre = val.Split(new char[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
-                        foreach (var i in tmpPre)
-                        {
-                            _ignoredFilePattern.Add(i.Trim());
-                        }
-                    }
+                    _argSt = ArgState.View;
+                    break;
+                }
+                else if (
+                    name.Equals("/i", StringComparison.OrdinalIgnoreCase) ||
+                    name.Equals("-i", StringComparison.OrdinalIgnoreCase)
+                    )
+                {
+                    Config.Args.IgnoredFilePattern = Utils.ConvertStringToList(val);
                 }
                 else if (
                     name.Equals("/c", StringComparison.OrdinalIgnoreCase) ||
@@ -488,8 +526,8 @@ class Program
                     break;
                 }
                 else if (
-                    name.Equals("/rg", StringComparison.OrdinalIgnoreCase) ||
-                    name.Equals("-rg", StringComparison.OrdinalIgnoreCase)
+                    name.Equals("/r", StringComparison.OrdinalIgnoreCase) ||
+                    name.Equals("-r", StringComparison.OrdinalIgnoreCase)
                     )
                 {
                     _argSt = ArgState.RemoveCreds;
@@ -500,69 +538,49 @@ class Program
                     name.Equals("-s", StringComparison.OrdinalIgnoreCase)
                     )
                 {
-                    string[] tmpPat = val.Split(new char[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
-                    _fileSearchPattern.Clear();
-                    foreach (var i in tmpPat)
-                    {
-                        _fileSearchPattern.Add(i.Trim());
-                    }
+                    Config.Args.FileSearchPattern = Utils.ConvertStringToList(val);
                 }
                 else if (
                    name.Equals("/f", StringComparison.OrdinalIgnoreCase) ||
                    name.Equals("-f", StringComparison.OrdinalIgnoreCase)
                    )
                 {
-                    if (!ValidFileName(val))
-                    {
-                        _errMsg.AppendLine(String.Format("The output filename is invalid {0}.", val));
-                    }
-                    else
-                    {
-                        _outputFileNameOnly = val;
-                    }
+                    Config.Args.OutputFileName = val;
                 }
                 else if (
                    name.Equals("/o", StringComparison.OrdinalIgnoreCase) ||
                    name.Equals("-o", StringComparison.OrdinalIgnoreCase)
                    )
                 {
-                    if (!Directory.Exists(val))
-                    {
-                        string? drive = Path.GetPathRoot(val);
-                        if (!Directory.Exists(drive))
-                        {
-                            _errMsg.AppendLine($"Drive letter {drive} specified doesn't exist.");
-                        }
-                        else
-                        {
-                            var di = Directory.CreateDirectory(val);
-                            _outDir = di.FullName;
-                        }
-                    }
-                    else
-                    {
-                        _outDir = new DirectoryInfo(val).FullName;
-                    }
+                    Config.Args.OutputDirectory = val;
                 }
                 else if (
                    name.Equals("/so", StringComparison.OrdinalIgnoreCase) ||
                    name.Equals("-so", StringComparison.OrdinalIgnoreCase)
                    )
                 {
-                    string[] tmpDirs = val.Split(new char[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
-                    _directorySortOrder.Clear();
-                    foreach (var i in tmpDirs)
-                    {
-                        _directorySortOrder.Add(i.Trim());
-                    }
-                    // validation happens after due to a user may pass in the source directory as an arg
+                    Config.Args.DirectorySortOrder = Utils.ConvertStringToList(val);
+                }
+                else if (
+                    name.Equals("/sd", StringComparison.OrdinalIgnoreCase) ||
+                    name.Equals("-sd", StringComparison.OrdinalIgnoreCase))
+                {
+                    Config.Args.SubDirectories = Utils.ConvertStringToList(val);
+                }
+                else if (
+                    name.Equals("/fe", StringComparison.OrdinalIgnoreCase) ||
+                    name.Equals("-fe", StringComparison.OrdinalIgnoreCase))
+                {
+                    Config.Args.FileExtensions.Clear();
+                    Config.Args.FileExtensions = Utils.ConvertStringToList(val);
+                    Utils.ValidateFileExtensions(Config.Args.FileExtensions);
                 }
                 else if (
                     name.Equals("/st", StringComparison.OrdinalIgnoreCase) ||
                     name.Equals("-st", StringComparison.OrdinalIgnoreCase))
                 {
-                    _searchFromDate = Utils.GetConfigDateTimeOffset(val);
-                    if (_searchFromDate == DateTimeOffset.MinValue)
+                    Config.Args.SearchFromDate = Utils.GetConfigDateTimeOffset(val);
+                    if (Config.Args.SearchFromDate == DateTimeOffset.MinValue)
                     {
                         _errMsg.AppendLine(String.Format("Unable to determine the time value of {0} for arg {1}.", val, name));
                     }
@@ -571,8 +589,8 @@ class Program
                     name.Equals("/en", StringComparison.OrdinalIgnoreCase) ||
                     name.Equals("-en", StringComparison.OrdinalIgnoreCase))
                 {
-                    _searchToDate = Utils.GetConfigDateTimeOffset(val);
-                    if (_searchToDate == DateTimeOffset.MinValue)
+                    Config.Args.SearchToDate = Utils.GetConfigDateTimeOffset(val);
+                    if (Config.Args.SearchToDate == DateTimeOffset.MinValue)
                     {
                         _errMsg.AppendLine(String.Format("Unable to determine the time value of {0} for arg {1}.", val, name));
                     }
@@ -616,26 +634,26 @@ class Program
     {
         string msg = "";
 
-        if (string.IsNullOrWhiteSpace(Utils.GetRepoPersonalAccessToken()))
+        if (string.IsNullOrWhiteSpace(Utils.GetRepoPersonalAccessToken(EnvKey_PersonalAccessToken)))
         {
             msg += $"{_leftPadding}Missing required GitHub Personal Access Token. Use /c:<PAT> to set the value before proceeding.{Environment.NewLine}";
         }
-        if (string.IsNullOrWhiteSpace(Settings.ProductHeader))
+        if (string.IsNullOrWhiteSpace(Config.GitHub.ProductHeader))
         {
             msg += $"{_leftPadding}Missing required configuration field: ProductHeader{Environment.NewLine}";
         }
-        if (string.IsNullOrWhiteSpace(Settings.RepoOwnerName))
+        if (string.IsNullOrWhiteSpace(Config.GitHub.RepoOwnerName))
         {
             msg += $"{_leftPadding}Missing required configuration field: RepoOwnerName{Environment.NewLine}";
         }
-        if (string.IsNullOrWhiteSpace(Settings.RepoName))
+        if (string.IsNullOrWhiteSpace(Config.GitHub.RepoName))
         {
             msg += $"{_leftPadding}Missing required configuration field: RepoName{Environment.NewLine}";
         }
         if (msg.Length > 0)
         {
             Utils.ConsoleColorRed();
-            Console.WriteLine($"The minimum criteria to run {Settings.AppName} have not been met.");
+            Console.WriteLine($"The minimum criteria to run {Utils.AppName} have not been met.");
             Console.WriteLine(msg);
             Console.ResetColor();
         }
