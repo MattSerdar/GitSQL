@@ -1,6 +1,4 @@
-﻿using System.Text.Json;
-
-namespace GitSQL;
+﻿namespace GitSQL;
 class Program
 {
     private const string _leftPadding = "    ";
@@ -28,7 +26,6 @@ class Program
         "st",// SearchFromDate
         "v",// display config file
     };
-
     public static async Task<int> Main(string[] args)
     {
         try
@@ -156,10 +153,7 @@ class Program
         string c = Utils.GetRepoPersonalAccessToken(EnvKey_PersonalAccessToken);
         if (!string.IsNullOrWhiteSpace(c))
         {
-            SetClipboardText(c);
-            Utils.ConsoleColorCyan();
-            Console.WriteLine("Credentials copied to clipboard.");
-            Console.ResetColor();
+            Console.WriteLine(c);
         }
         else
         {
@@ -167,20 +161,6 @@ class Program
             Console.WriteLine("No credentials found.");
             Console.ResetColor();
         }
-    }
-    private static void SetClipboardText(string text)
-    {
-        //Thread STAThread = new Thread(
-        //    delegate ()
-        //    {
-        //        System.Windows.Forms.Clipboard.SetText(text);
-        //    });
-        //STAThread.SetApartmentState(ApartmentState.STA);
-        //STAThread.Start();
-        //STAThread.Join();
-
-        // TODO: fix this - need to find out how to add assembly ref to System.Windows;
-        Console.WriteLine("Not working at this point...");
     }
     private static void SetCredentials()
     {
@@ -310,7 +290,7 @@ class Program
         Console.WriteLine();
         Console.WriteLine($"{_leftPadding}Configuring your GitHub setup:");
         DisplayHelpArg("/c:", "<PAT>", "use this to set your GitHub PAT \"Personal Access Token\"");
-        DisplayHelpArg("/g", "", "Gets your current GitHub PAT and copies to clipboard");
+        DisplayHelpArg("/g", "", "Gets your current GitHub PAT and prints to the console - BEWARE SHOULDER SURFERS!");
         DisplayHelpArg("/r", "", "Removes your stored PAT from this environment - DOES NOT REMOVE FROM GITHUB");
 
         Console.WriteLine();
