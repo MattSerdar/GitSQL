@@ -92,13 +92,12 @@ public class Git
                     sb.AppendLine("  " + f.FileName);
                 }
             }
-
         }
 
         sb.AppendLine("*/");
         return sb;
     }
-    private void GetFiles()
+    private async ValueTask GetFiles()
     {
         TruncateDir();
         var utf8 = new UTF8Encoding(false);
@@ -112,9 +111,15 @@ public class Git
             fNamesList.AppendFormat("END{0}GO{0}", Environment.NewLine);
             fNamesList.AppendLine();
 
+            int count = 0;
+            int size = GitResults.ValidCommits.Sum(e => e.CommitFiles.Count);
+            Utils.ConsoleColorCyan();
+            Console.CursorVisible = false;
+
             using (var sw = new StreamWriter(Settings.OutputFileNamePath, false, utf8))
             {
-                sw.Write(fNamesList.ToString());
+                await sw.WriteAsync(fNamesList.ToString());
+
                 foreach (var vc in GitResults.ValidCommits)
                 {
                     foreach (var f in vc.CommitFiles.OrderBy(e => e.FileName))
@@ -127,7 +132,10 @@ public class Git
                             {
                                 n = CleanupText(n);
                             }
-                            sw.Write(n);
+                            // the additional padding is to prevent the possibility of text that lingers at the end - this will clear it out
+                            Console.Write($"Writing file {++count} of {size}       ");
+                            Console.CursorLeft = 0;
+                            await sw.WriteAsync(n);
                         }
                         catch (Exception exc)
                         {
@@ -136,12 +144,15 @@ public class Git
                     }
                 }
             }
-}
-else
-{
+            Console.WriteLine();
+            Console.ResetColor();
+            Console.CursorVisible = true;
+        }
+        else
+        {
             using (var sw = new StreamWriter(Settings.OutputFileNamePath, false, utf8))
             {
-                sw.Write(GetOutputHeader().ToString());
+                await sw.WriteAsync(GetOutputHeader().ToString());
             }
         }
         Utils.OpenFile(Settings.OutputFileNamePath);
@@ -304,7 +315,7 @@ else
         {
             GitResults.ValidCommits = GitResults.ValidCommits.OrderBy(e => e.DirectorySortOrder).ThenBy(e => e.Directory).ToList();
         }
-        GetFiles();
+        await GetFiles();
     }
     private void WriteLineToConsole(string txt)
     {
