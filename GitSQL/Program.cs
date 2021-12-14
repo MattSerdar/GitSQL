@@ -112,6 +112,7 @@ class Program
                     OutputFileName = Config.Args.OutputFileName,
                     OutputDirectory = Config.Args.OutputDirectory,
                     RepoPersonalAccessToken = Utils.GetRepoPersonalAccessToken(EnvKey_PersonalAccessToken),
+                    FileExtensions = Config.Args.FileExtensions,
                     RawArgs = args.ToList()
                 };
                 GitResult result = new();
